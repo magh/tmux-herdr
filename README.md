@@ -47,6 +47,7 @@ are shown on the right.
 
 Windows running a coding agent get a status icon. Supported agents:
 [GitHub Copilot CLI](https://github.com/github/copilot-cli),
+[Codex CLI](https://github.com/openai/codex),
 [Claude Code](https://code.claude.com), [OpenCode](https://opencode.ai),
 [pi](https://github.com/earendil-works/pi) and
 [Hermes Agent](https://github.com/NousResearch/hermes-agent).
@@ -77,10 +78,11 @@ scripts/install-agent-hooks.sh --uninstall
 
 Restart running agent sessions afterwards. What gets installed:
 
-| Agent    | Integration                                                         |
-| -------- | ------------------------------------------------------------------- |
-| copilot  | `~/.copilot/hooks/tmux-herdr.json`                                  |
-| claude   | hooks merged into `~/.claude/settings.json` (backup kept as `.bak`) |
+| Agent    | Integration                                                                                      |
+| -------- | ------------------------------------------------------------------------------------------------ |
+| copilot  | `~/.copilot/hooks/tmux-herdr.json`                                                               |
+| codex    | hooks block in `~/.codex/config.toml` (backup kept as `.bak`); Codex asks to trust them on next start |
+| claude   | hooks merged into `~/.claude/settings.json` (backup kept as `.bak`)                               |
 | opencode | plugin `~/.config/opencode/plugins/tmux-herdr.js`                   |
 | pi       | extension `~/.pi/agent/extensions/tmux-herdr.ts`                    |
 | hermes   | shell hooks block in `~/.hermes/config.yaml`; Hermes asks you to approve each hook on first use |
@@ -95,8 +97,8 @@ status the same way.
 Known limitations: when you interrupt an agent (Esc/Ctrl-C) some agents don't
 fire their "turn finished" hook, so the status can stay yellow until the next
 prompt. Claude Code and Copilot only report "waiting" for their own permission
-prompts and questions; pi reports it for extension dialogs (it has no built-in
-permission prompts).
+prompts and questions, Codex for approval prompts; pi reports it for extension
+dialogs (it has no built-in permission prompts).
 
 ## Options
 

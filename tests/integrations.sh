@@ -78,13 +78,21 @@ expect_states "pi extension stays quiet outside the TUI" ""
 
 # --- installer ----------------------------------------------------------------------
 home="$TMP/home"
-mkdir -p "$home/.claude" "$home/.hermes"
+mkdir -p "$home/.claude" "$home/.codex" "$home/.hermes"
 echo '{"model":"x","hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo mine"}]}]}}' >"$home/.claude/settings.json"
+cat >"$home/.codex/config.toml" <<'TOML'
+model = "x"
+
+[hooks]
+
+[[hooks.Stop]]
+hooks = [{ type = "command", command = "echo mine" }]
+TOML
 echo 'model: x' >"$home/.hermes/config.yaml"
 installer() { HOME=$home XDG_CONFIG_HOME=$home/.config "$ROOT/scripts/install-agent-hooks.sh" "$@" >/dev/null; }
 
-installer copilot claude opencode pi hermes
-installer copilot claude opencode pi hermes
+installer copilot codex claude opencode pi hermes
+installer copilot codex claude opencode pi hermes
 
 if python3 - "$home/.claude/settings.json" <<'PY'; then
 import json, sys
@@ -97,6 +105,23 @@ PY
 	pass "installer merges claude hooks idempotently"
 else
 	fail "installer merges claude hooks idempotently"
+fi
+
+if python3 - "$home/.codex/config.toml" "$home/.codex/tmux-herdr-notify.sh" "$ROOT/scripts/agent-state.sh" <<'PY'; then
+import os, sys, tomllib
+d = tomllib.load(open(sys.argv[1], "rb"))
+wrapper, state = sys.argv[2], sys.argv[3]
+ours = [h for gs in d["hooks"].values() for g in gs for h in g["hooks"] if wrapper in h["command"]]
+mine = [h for g in d["hooks"]["Stop"] for h in g["hooks"] if "echo mine" in h["command"]]
+assert d["model"] == "x"
+assert len(ours) == 8, len(ours)
+assert len(mine) == 1, mine
+assert os.access(wrapper, os.X_OK)
+assert state in open(wrapper).read()
+PY
+	pass "installer merges codex hooks idempotently"
+else
+	fail "installer merges codex hooks idempotently"
 fi
 
 if [[ $(grep -c '^hooks:' "$home/.hermes/config.yaml") -eq 1 ]]; then
@@ -113,11 +138,11 @@ else
 	fail "installer writes copilot, opencode and pi integrations"
 fi
 
-installer --uninstall copilot claude opencode pi hermes
+installer --uninstall copilot codex claude opencode pi hermes
 if [[ ! -e $home/.copilot/hooks/tmux-herdr.json && ! -e $home/.config/opencode/plugins/tmux-herdr.js &&
-	! -e $home/.pi/agent/extensions/tmux-herdr.ts ]] &&
-	! grep -q tmux-herdr "$home/.claude/settings.json" "$home/.hermes/config.yaml" &&
-	grep -q 'echo mine' "$home/.claude/settings.json"; then
+	! -e $home/.pi/agent/extensions/tmux-herdr.ts && ! -e $home/.codex/tmux-herdr-notify.sh ]] &&
+	! grep -q tmux-herdr "$home/.claude/settings.json" "$home/.hermes/config.yaml" "$home/.codex/config.toml" &&
+	grep -q 'echo mine' "$home/.claude/settings.json" "$home/.codex/config.toml"; then
 	pass "uninstall removes only tmux-herdr hooks"
 else
 	fail "uninstall removes only tmux-herdr hooks"

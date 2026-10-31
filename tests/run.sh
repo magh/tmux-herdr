@@ -5,13 +5,14 @@ set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SOCKET="herdr-test-$$"
 CONF=$(mktemp)
+WRAPPER=$(mktemp)
 failures=0
 
 t() { tmux -L "$SOCKET" "$@"; }
 
 cleanup() {
 	t kill-server 2>/dev/null
-	rm -f "$CONF"
+	rm -f "$CONF" "$WRAPPER"
 }
 trap cleanup EXIT
 
@@ -182,6 +183,40 @@ check "shell indicator can be disabled" first_line_plain
 t new-window -d -t t: -n detect 'exec -a claude sleep 1000'
 detect_line_running() { t capture-pane -p -t "$(sidebar_pane t:first)" | grep -q -- ' detect .*◌ *$'; }
 check "claude/opencode/pi/hermes detected by process name" detect_line_running
+
+t new-window -d -t t: -n detect2 'exec -a codex sleep 1000'
+detect2_line_running() { t capture-pane -p -t "$(sidebar_pane t:first)" | grep -q -- ' detect2 .*◌ *$'; }
+check "codex detected by process name" detect2_line_running
+
+# --- codex hook wrapper ---------------------------------------------------------
+# Hooks may run in the shared app-server daemon, whose environment belongs to
+# the pane that started it; the wrapper must report to the pane of the codex
+# session the event came from (matched by cwd), and must not pollute a pane
+# that is not running codex.
+# A distinct cwd keeps the pane unambiguous (detect2 above also runs "codex").
+t new-window -d -t t: -n codexwrap -c /tmp 'exec -a codex sleep 1000'
+codex_pane=$(t list-panes -t t:codexwrap -F '#{pane_id} #{@herdr_sidebar}' | awk '$2 != "1" { print $1; exit }')
+codex_cwd=$(t display-message -p -t "$codex_pane" '#{pane_current_path}')
+shell_pane=$(t list-panes -t t:codexwrap -F '#{pane_id} #{@herdr_sidebar}' | awk '$2 == "1" { print $1 }')
+sed "s|@AGENT_STATE@|$ROOT/scripts/agent-state.sh|" "$ROOT/integrations/codex.sh" >"$WRAPPER"
+codex_wrap() { TMUX="$socket,0,0" TMUX_PANE=$1 bash "$WRAPPER" "$2" <<<"$3"; }
+pane_agent() { t display-message -p -t "$1" '#{@herdr_agent}'; }
+
+codex_wrap "$shell_pane" working "{\"cwd\":\"$codex_cwd\"}"
+codex_pane_working() { [[ $(pane_agent "$codex_pane") == working ]]; }
+check "codex wrapper reports to the pane matching the payload cwd" codex_pane_working
+shell_pane_clean() { [[ -z $(pane_agent "$shell_pane") ]]; }
+check "codex wrapper leaves other panes untouched" shell_pane_clean
+
+codex_wrap "$codex_pane" idle "{\"cwd\":\"$codex_cwd\"}"
+codex_pane_idle() { [[ $(pane_agent "$codex_pane") == idle ]]; }
+check "codex wrapper keeps its own pane when it matches" codex_pane_idle
+
+codex_wrap "$shell_pane" working '{"cwd":"/nonexistent-herdr-test"}'
+check "codex wrapper does not pollute a non-codex pane" shell_pane_clean
+
+TMUX_PANE="$codex_pane" bash "$WRAPPER" working <<<'{}'
+check "codex wrapper stays quiet outside tmux" codex_pane_idle
 
 echo
 if ((failures)); then

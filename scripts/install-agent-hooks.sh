@@ -2,7 +2,7 @@
 # Installs (or with --uninstall removes) hooks/plugins that report coding agent
 # working/waiting/idle status to the herdr sidebar.
 #
-# Usage: install-agent-hooks.sh [--uninstall] [copilot|claude|opencode|pi|hermes ...]
+# Usage: install-agent-hooks.sh [--uninstall] [copilot|codex|claude|opencode|pi|hermes ...]
 # Without agent names, every supported agent found on this machine is handled.
 
 set -eu
@@ -10,9 +10,10 @@ set -eu
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 AGENT_STATE="$ROOT/scripts/agent-state.sh"
 MARKER=tmux-herdr
-ALL_AGENTS=(copilot claude opencode pi hermes)
+ALL_AGENTS=(copilot codex claude opencode pi hermes)
 
 COPILOT_DIR=${COPILOT_HOME:-$HOME/.copilot}
+CODEX_DIR=${CODEX_HOME:-$HOME/.codex}
 CLAUDE_DIR=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
 OPENCODE_DIR=${XDG_CONFIG_HOME:-$HOME/.config}/opencode
 PI_DIR=${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}
@@ -23,7 +24,7 @@ agents=()
 for arg in "$@"; do
 	case $arg in
 	--uninstall) uninstall=1 ;;
-	copilot | claude | opencode | pi | hermes) agents+=("$arg") ;;
+	copilot | codex | claude | opencode | pi | hermes) agents+=("$arg") ;;
 	-h | --help)
 		sed -n '2,6s/^# \{0,1\}//p' "$0"
 		exit 0
@@ -38,6 +39,7 @@ done
 config_dir() {
 	case $1 in
 	copilot) echo "$COPILOT_DIR" ;;
+	codex) echo "$CODEX_DIR" ;;
 	claude) echo "$CLAUDE_DIR" ;;
 	opencode) echo "$OPENCODE_DIR" ;;
 	pi) echo "$PI_DIR" ;;
@@ -93,6 +95,83 @@ install_copilot() {
 }
 EOF
 	echo "copilot: installed $file"
+}
+
+# --- Codex CLI: hooks block in config.toml -------------------------------------
+# Codex runs hooks from a shared app-server daemon, so the TUI must trust them
+# once at startup before they fire (same as Hermes' first-use approval). The
+# wrapper resolves the right pane, since the daemon's environment belongs to
+# whichever pane started it.
+install_codex() {
+	local file="$CODEX_DIR/config.toml" begin="# >>> $MARKER" end="# <<< $MARKER"
+	local tmp
+	tmp=$(mktemp)
+	if [[ -f $file ]]; then
+		sed "/^$begin\$/,/^$end\$/d" "$file" >"$tmp"
+	else
+		: >"$tmp"
+	fi
+	local wrapper="$CODEX_DIR/tmux-herdr-notify.sh"
+	if ((uninstall)); then
+		local removed=0
+		if [[ -f $file ]] && grep -qxF "$begin" "$file"; then
+			# cat (not mv/sed -i) so a symlinked config stays a symlink.
+			cat "$tmp" >"$file"
+			removed=1
+		fi
+		rm -f "$wrapper"
+		if ((removed)); then
+			echo "codex: removed hooks from $file"
+		else
+			echo "codex: nothing to remove"
+		fi
+		rm -f "$tmp"
+		return
+	fi
+	mkdir -p "$CODEX_DIR"
+	install_template "$ROOT/integrations/codex.sh" "$wrapper"
+	chmod +x "$wrapper"
+	[[ -f $file ]] && cp "$file" "$file.$MARKER.bak"
+	[[ -s $tmp && -n $(tail -c 1 "$tmp") ]] && echo >>"$tmp"
+	local esc=${wrapper//\\/\\\\}
+	esc=${esc//\"/\\\"}
+	cat >>"$tmp" <<EOF
+$begin
+[[hooks.SessionStart]]
+hooks = [{ type = "command", command = "$esc idle", timeout = 5 }]
+
+[[hooks.UserPromptSubmit]]
+hooks = [{ type = "command", command = "$esc working", timeout = 5 }]
+
+[[hooks.PermissionRequest]]
+hooks = [{ type = "command", command = "$esc waiting", timeout = 5 }]
+
+[[hooks.PreToolUse]]
+hooks = [{ type = "command", command = "$esc working", timeout = 5 }]
+
+[[hooks.PostToolUse]]
+hooks = [{ type = "command", command = "$esc working", timeout = 5 }]
+
+[[hooks.Stop]]
+hooks = [{ type = "command", command = "$esc idle", timeout = 5 }]
+
+[[hooks.Interrupt]]
+hooks = [{ type = "command", command = "$esc idle", timeout = 5 }]
+
+[[hooks.SessionEnd]]
+hooks = [{ type = "command", command = "$esc clear", timeout = 3 }]
+$end
+EOF
+	# Never leave the user's config unparseable.
+	if command -v python3 >/dev/null 2>&1 &&
+		! python3 -c 'import sys, tomllib; tomllib.load(open(sys.argv[1], "rb"))' "$tmp" 2>/dev/null; then
+		rm -f "$tmp"
+		echo "codex: $file is not valid TOML; not touching it" >&2
+		return 1
+	fi
+	cat "$tmp" >"$file"
+	rm -f "$tmp"
+	echo "codex: installed hooks in $file (backup: $file.$MARKER.bak; Codex asks to trust them on next start)"
 }
 
 # --- Claude Code: merged into settings.json ------------------------------------

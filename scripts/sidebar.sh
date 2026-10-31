@@ -24,7 +24,7 @@ icon_w=0
 # options set by agent hooks, else "running" if the pane looks like a known
 # agent (Copilot runs as node, so it's matched by title). Sidebar panes are
 # skipped.
-AGENT_DETECT='#{||:#{m:*GitHub Copilot,#{pane_title}},#{m/r:^(claude|opencode|pi|hermes)$,#{pane_current_command}}}'
+AGENT_DETECT='#{||:#{m:*GitHub Copilot,#{pane_title}},#{m/r:^(claude|codex|opencode|pi|hermes)$,#{pane_current_command}}}'
 AGENT_FORMAT="#{P:#{?@herdr_sidebar,,#{?@herdr_agent,#{@herdr_agent},#{?${AGENT_DETECT},running,none}}/#{pane_current_command}/#{@herdr_agent_pid} }}"
 SHELL_RE='^-?(ba|z|fi|k|tc|c|da|nu|a)?sh$'
 
