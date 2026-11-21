@@ -111,17 +111,19 @@ if python3 - "$home/.codex/config.toml" "$home/.codex/tmux-herdr-notify.sh" "$RO
 import os, sys, tomllib
 d = tomllib.load(open(sys.argv[1], "rb"))
 wrapper, state = sys.argv[2], sys.argv[3]
-ours = [h for gs in d["hooks"].values() for g in gs for h in g["hooks"] if wrapper in h["command"]]
+hook_command = '"${CODEX_HOME:-$HOME/.codex}/tmux-herdr-notify.sh"'
+ours = [h for gs in d["hooks"].values() for g in gs for h in g["hooks"] if h["command"].startswith(hook_command)]
 mine = [h for g in d["hooks"]["Stop"] for h in g["hooks"] if "echo mine" in h["command"]]
 assert d["model"] == "x"
 assert len(ours) == 8, len(ours)
 assert len(mine) == 1, mine
 assert os.access(wrapper, os.X_OK)
 assert state in open(wrapper).read()
+assert all(wrapper not in h["command"] for h in ours), ours
 PY
-	pass "installer merges codex hooks idempotently"
+	pass "installer writes portable Codex hooks idempotently"
 else
-	fail "installer merges codex hooks idempotently"
+	fail "installer writes portable Codex hooks idempotently"
 fi
 
 if [[ $(grep -c '^hooks:' "$home/.hermes/config.yaml") -eq 1 ]]; then

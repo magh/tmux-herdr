@@ -133,33 +133,35 @@ install_codex() {
 	chmod +x "$wrapper"
 	[[ -f $file ]] && cp "$file" "$file.$MARKER.bak"
 	[[ -s $tmp && -n $(tail -c 1 "$tmp") ]] && echo >>"$tmp"
-	local esc=${wrapper//\\/\\\\}
-	esc=${esc//\"/\\\"}
+	# Codex executes hook commands through a shell. Keep the command portable
+	# between macOS and Linux (and respect a custom CODEX_HOME) instead of
+	# embedding the install machine's absolute home path.
+	local hook_command='"${CODEX_HOME:-$HOME/.codex}/tmux-herdr-notify.sh"'
 	cat >>"$tmp" <<EOF
 $begin
 [[hooks.SessionStart]]
-hooks = [{ type = "command", command = "$esc idle", timeout = 5 }]
+hooks = [{ type = "command", command = '$hook_command idle', timeout = 5 }]
 
 [[hooks.UserPromptSubmit]]
-hooks = [{ type = "command", command = "$esc working", timeout = 5 }]
+hooks = [{ type = "command", command = '$hook_command working', timeout = 5 }]
 
 [[hooks.PermissionRequest]]
-hooks = [{ type = "command", command = "$esc waiting", timeout = 5 }]
+hooks = [{ type = "command", command = '$hook_command waiting', timeout = 5 }]
 
 [[hooks.PreToolUse]]
-hooks = [{ type = "command", command = "$esc working", timeout = 5 }]
+hooks = [{ type = "command", command = '$hook_command working', timeout = 5 }]
 
 [[hooks.PostToolUse]]
-hooks = [{ type = "command", command = "$esc working", timeout = 5 }]
+hooks = [{ type = "command", command = '$hook_command working', timeout = 5 }]
 
 [[hooks.Stop]]
-hooks = [{ type = "command", command = "$esc idle", timeout = 5 }]
+hooks = [{ type = "command", command = '$hook_command idle', timeout = 5 }]
 
 [[hooks.Interrupt]]
-hooks = [{ type = "command", command = "$esc idle", timeout = 5 }]
+hooks = [{ type = "command", command = '$hook_command idle', timeout = 5 }]
 
 [[hooks.SessionEnd]]
-hooks = [{ type = "command", command = "$esc clear", timeout = 3 }]
+hooks = [{ type = "command", command = '$hook_command clear', timeout = 3 }]
 $end
 EOF
 	# Never leave the user's config unparseable.
@@ -273,7 +275,13 @@ install_pi() {
 install_hermes() {
 	local file="$HERMES_DIR/config.yaml" begin="# >>> $MARKER" end="# <<< $MARKER"
 	if [[ -f $file ]] && grep -qxF "$begin" "$file"; then
-		sed -i "/^$begin\$/,/^$end\$/d" "$file"
+		# BSD sed requires a backup extension for -i, unlike GNU sed. Rewrite via
+		# a temporary file so re-install and uninstall work on both macOS/Linux.
+		local tmp
+		tmp=$(mktemp)
+		sed "/^$begin\$/,/^$end\$/d" "$file" >"$tmp"
+		cat "$tmp" >"$file"
+		rm -f "$tmp"
 	fi
 	if ((uninstall)); then
 		echo "hermes: removed hooks from $file"
